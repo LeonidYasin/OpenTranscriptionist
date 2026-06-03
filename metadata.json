@@ -1,6 +1,6 @@
 {
   "name": "Audio Transcriber",
-  "description": "Transcribe local audio, live voicenotes, and YouTube videos into SRT subtitles, chapters, and plain text using native extraction and the Gemini API.",
+  "description": "Локальное оффлайн-распознавание речи, аудиофайлов (включая m4a) и диктовки с использованием встроенного системного движка SpeechRecognizer с выводом в чистые SRT-субтитры, главы и текст.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
