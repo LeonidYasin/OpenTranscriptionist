@@ -146,8 +146,8 @@ fun MainScreen(
                         
                         val isModelDownloaded by viewModel.isModelDownloaded.collectAsStateWithLifecycle()
                         val localModelSize by viewModel.localModelSize.collectAsStateWithLifecycle()
-                        var isDownloading by remember { mutableStateOf(false) }
-                        var downloadProgress by remember { mutableStateOf(0f) }
+                        val isDownloading by viewModel.isDownloadingModel.collectAsStateWithLifecycle()
+                        val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
 
                         AlertDialog(
                             onDismissRequest = { showSettingsDialog = false },
@@ -429,11 +429,7 @@ fun MainScreen(
                                                         } else {
                                                             Button(
                                                                 onClick = {
-                                                                    isDownloading = true
-                                                                    viewModel.downloadModel(
-                                                                        onProgress = { p -> downloadProgress = p },
-                                                                        onResult = { success -> isDownloading = false }
-                                                                    )
+                                                                    viewModel.downloadModel()
                                                                 },
                                                                 shape = RoundedCornerShape(8.dp),
                                                                 modifier = Modifier.fillMaxWidth()
@@ -526,6 +522,8 @@ fun MainScreen(
                         )
                     }
                 }
+
+                WhisperModelStatusIndicator(viewModel = viewModel)
 
                 // Section 2: Input Options Cards
                 Text(
@@ -1449,4 +1447,231 @@ fun BlinkingCursor() {
             .height(13.dp)
             .background(Color(0xFF00FF66).copy(alpha = alpha))
     )
+}
+
+@Composable
+fun WhisperModelStatusIndicator(
+    viewModel: MainViewModel,
+    modifier: Modifier = Modifier
+) {
+    val localModelSize by viewModel.localModelSize.collectAsStateWithLifecycle()
+    val isModelDownloaded by viewModel.isModelDownloaded.collectAsStateWithLifecycle()
+    val isDownloading by viewModel.isDownloadingModel.collectAsStateWithLifecycle()
+    val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
+    val activeEngine by viewModel.activeEngine.collectAsStateWithLifecycle()
+
+    val isWhisperActive = activeEngine == "LOCAL_WHISPER"
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("whisper_status_indicator"),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(
+            width = 1.5.dp,
+            color = when {
+                isDownloading -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                isModelDownloaded && isWhisperActive -> Color(0xFF2E7D32).copy(alpha = 0.5f)
+                isModelDownloaded -> MaterialTheme.colorScheme.outlineVariant
+                else -> Color(0xFFC62828).copy(alpha = 0.5f)
+            }
+        ),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                isDownloading -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                isModelDownloaded && isWhisperActive -> Color(0xFFE8F5E9).copy(alpha = 0.8f)
+                isModelDownloaded -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.1f)
+                else -> Color(0xFFFFEBEE).copy(alpha = 0.6f)
+            }
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (isDownloading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 2.5.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (isModelDownloaded) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            contentDescription = "Status Icon",
+                            tint = if (isModelDownloaded) Color(0xFF2E7D32) else Color(0xFFC62828),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Локальный Whisper: ${localModelSize.uppercase()}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        val statusLabel = when {
+                            isDownloading -> "Скачивается в кэш..."
+                            isModelDownloaded -> "Готов к локальному распознаванию"
+                            else -> "Требуется скачивание"
+                        }
+                        Text(
+                            text = statusLabel,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // If Whisper not selected as current engine, show context label/switch option
+                if (!isWhisperActive && !isDownloading && isModelDownloaded) {
+                    TextButton(
+                        onClick = { viewModel.setEngine("LOCAL_WHISPER") },
+                        modifier = Modifier.testTag("activate_whisper_btn"),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                    ) {
+                        Text("Включить движок", fontSize = 11.sp)
+                    }
+                } else if (isWhisperActive) {
+                    Surface(
+                        color = Color(0xFF2E7D32).copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "АКТИВЕН",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 9.sp,
+                            color = Color(0xFF1B5E20),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+            }
+
+            // Content details / Action buttons / Selector row
+            if (isDownloading) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().animateContentSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    LinearProgressIndicator(
+                        progress = { downloadProgress },
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                    Text(
+                        text = "Прогресс загрузки: ${(downloadProgress * 100).toInt()}% (размер ~${getModelRoughSize(localModelSize)})",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Text(
+                    text = when {
+                        isModelDownloaded -> {
+                            val detailText = when (localModelSize) {
+                                "tiny" -> "Размер ~75М. Низкие ресурсы, высокая скорость, оптимальна для простых аудио."
+                                "base" -> "Размер ~145М. Сбалансированный выбор."
+                                else -> "Размер ~460М. Наивысшая точность, настоятельно рекомендуется для русского языка."
+                            }
+                            "Модель кэширована во внутреннюю память телефона. Оффлайн-распознавание полностью готово к запуску.\n$detailText"
+                        }
+                        else -> {
+                            val sizeSuggest = when (localModelSize) {
+                                "tiny" -> "~75 МБ. Быстрая загрузка."
+                                "base" -> "~145 МБ. Средняя точность."
+                                else -> "~460 МБ. Рекомендуется для русского языка."
+                            }
+                            "Для использования локального Whisper нужно загрузить файлы весов ($sizeSuggest). После скачивания Интернет будет не нужен."
+                        }
+                    },
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // Quick model selector row & instant Action button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Quick choose size buttons if not downloading
+                    Row(
+                        modifier = Modifier.weight(1.3f),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val sizes = listOf("tiny" to "Tiny", "base" to "Base", "small" to "Small")
+                        sizes.forEach { (sz, label) ->
+                            val isChosen = localModelSize == sz
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { viewModel.setLocalModelSize(sz) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isChosen) {
+                                    if (isModelDownloaded && isWhisperActive) Color(0xFF2E7D32).copy(alpha = 0.15f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                } else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                contentColor = if (isChosen) {
+                                    if (isModelDownloaded && isWhisperActive) Color(0xFF1B5E20) else MaterialTheme.colorScheme.primary
+                                } else MaterialTheme.colorScheme.onSurfaceVariant
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(vertical = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (!isModelDownloaded) {
+                        Button(
+                            onClick = { viewModel.downloadModel() },
+                            modifier = Modifier.weight(1f).testTag("download_model_main_btn"),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Скачать", fontSize = 11.sp)
+                        }
+                    } else {
+                        // Option to delete model size if ready
+                        IconButton(
+                            onClick = { viewModel.deleteLocalModel() },
+                            modifier = Modifier.size(36.dp).background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Удалить модель",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun getModelRoughSize(size: String): String {
+    return when (size) {
+        "tiny" -> "75 МБ"
+        "base" -> "145 МБ"
+        else -> "460 МБ"
+    }
 }

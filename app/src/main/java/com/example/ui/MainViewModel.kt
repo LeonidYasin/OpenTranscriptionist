@@ -77,6 +77,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isModelDownloaded = MutableStateFlow(false)
     val isModelDownloaded = _isModelDownloaded.asStateFlow()
 
+    private val _isDownloadingModel = MutableStateFlow(false)
+    val isDownloadingModel = _isDownloadingModel.asStateFlow()
+
+    private val _downloadProgress = MutableStateFlow(0f)
+    val downloadProgress = _downloadProgress.asStateFlow()
+
     init {
         checkModelDownloaded()
     }
@@ -116,8 +122,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _isModelDownloaded.value = false
     }
 
-    fun downloadModel(onProgress: (Float) -> Unit, onResult: (Boolean) -> Unit) {
+    fun downloadModel(onProgress: ((Float) -> Unit)? = null, onResult: ((Boolean) -> Unit)? = null) {
+        if (_isDownloadingModel.value) return
         viewModelScope.launch {
+            _isDownloadingModel.value = true
+            _downloadProgress.value = 0f
             val folder = File(getApplication<Application>().filesDir, "whisper")
             if (!folder.exists()) {
                 folder.mkdirs()
@@ -134,16 +143,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     else -> 400L
                 }
                 for (progress in 1..20) {
-                    onProgress(progress / 20f)
+                    val p = progress / 20f
+                    _downloadProgress.value = p
+                    onProgress?.invoke(p)
                     delay(duration)
                 }
                 modelFile.writeText("LITE_WEIGHTS_DUMMY_DATA_${size.uppercase()}")
                 vocabFile.writeText("VOCAB_DUMMY_DATA")
                 _isModelDownloaded.value = true
-                onResult(true)
+                _isDownloadingModel.value = false
+                _downloadProgress.value = 0f
+                onResult?.invoke(true)
             } catch (e: Exception) {
                 e.printStackTrace()
-                onResult(false)
+                _isDownloadingModel.value = false
+                _downloadProgress.value = 0f
+                onResult?.invoke(false)
             }
         }
     }
