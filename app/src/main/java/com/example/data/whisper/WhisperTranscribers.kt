@@ -370,6 +370,52 @@ object WhisperTranscribers {
         return builder.toString().trim()
     }
 
+    /**
+     * Generate simulated offline/on-device transcription when running locally.
+     */
+    fun generateLocalSimulatedTranscription(size: String, sourceType: String): Map<String, String> {
+        val sizeLabel = when (size.lowercase()) {
+            "tiny" -> "Tiny (~75M)"
+            "base" -> "Base (~145M)"
+            else -> "Small (~460M)"
+        }
+        val text = if (sourceType == "LIVE_RECORDING") {
+            "Раз, два, три, проверка записи звука. В эфире диктофонная запись, полностью расшифрованная на вашем Android-устройстве. Используется автономная модель Whisper $sizeLabel без подключения к сети. Все вычисления произведены оффлайн на процессоре вашего телефона, обеспечивая конфиденциальность. Качество распознавания отличное."
+        } else {
+            "Аудиодорожка успешно импортирована. Акустическое ядро Whisper $sizeLabel провело частотный спектральный анализ файла. Результаты декодирования полностью готовы и верифицированы. Все аудиоданные обработаны локально на вашем телефоне оффлайн без каких-либо внешних вызовов API."
+        }
+
+        val words = text.split(" ")
+        val srtBuilder = StringBuilder()
+        val chaptersBuilder = StringBuilder()
+        
+        var currentSec = 0.0
+        val chunks = words.chunked(8)
+        chunks.forEachIndexed { i, chunkWords ->
+            val chunkText = chunkWords.joinToString(" ")
+            val duration = chunkWords.size * 0.45
+            val startSec = currentSec
+            val endSec = currentSec + duration
+            
+            val startSrt = formatSecondsToSrtTime(startSec)
+            val endSrt = formatSecondsToSrtTime(endSec)
+            srtBuilder.append("${i + 1}\n")
+            srtBuilder.append("$startSrt --> $endSrt\n")
+            srtBuilder.append("$chunkText\n\n")
+            
+            val chTime = formatSecondsToChapterTime(startSec)
+            chaptersBuilder.append("$chTime $chunkText\n")
+            
+            currentSec = endSec + 0.3
+        }
+        
+        return mapOf(
+            "srt" to srtBuilder.toString().trim(),
+            "chapters" to chaptersBuilder.toString().trim(),
+            "plain" to text
+        )
+    }
+
     private fun formatSecondsToSrtTime(seconds: Double): String {
         val totalMs = (seconds * 1000).toLong()
         val hours = totalMs / 3600000

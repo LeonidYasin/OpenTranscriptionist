@@ -886,12 +886,53 @@ fun MainScreen(
 
             // 3. Error state Dialog info box
             if (processState is ProcessState.Error) {
-                val errMsg = (processState as ProcessState.Error).message
+                val errorState = processState as ProcessState.Error
+                val errMsg = errorState.message
+                val logs = errorState.logs
                 AlertDialog(
                     onDismissRequest = { viewModel.setIdle() },
                     icon = { Icon(Icons.Default.Error, contentDescription = "Error", tint = Color.Red) },
                     title = { Text("Ошибка") },
-                    text = { Text(errMsg) },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(errMsg, style = MaterialTheme.typography.bodyMedium)
+                            
+                            if (logs.isNotEmpty()) {
+                                Text(
+                                    text = "Пошаговый отладочный лог:",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 160.dp)
+                                        .clip(RoundedCornerShape(8.dp)),
+                                    color = Color(0xFF0F0F0F),
+                                    border = BorderStroke(1.dp, Color(0xFFFF5F56).copy(alpha = 0.3f))
+                                ) {
+                                    LazyColumn(
+                                        modifier = Modifier.padding(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        items(logs) { logLine ->
+                                            Text(
+                                                text = if (logLine.startsWith("[ОШИБКА]")) "❌ $logLine" else "  $logLine",
+                                                color = if (logLine.startsWith("[ОШИБКА]")) Color(0xFFFF5252) else if (logLine.contains("Успешно") || logLine.startsWith("[УСПЕХ]")) Color(0xFF00FF66) else Color(0xFFECEFF1),
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 11.sp,
+                                                lineHeight = 14.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
                     confirmButton = {
                         Button(onClick = { viewModel.setIdle() }) {
                             Text("Закрыть")

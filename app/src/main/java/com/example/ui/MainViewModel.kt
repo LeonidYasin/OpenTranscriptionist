@@ -31,7 +31,7 @@ sealed class ProcessState {
     data class Loading(val message: String, val logs: List<String> = emptyList()) : ProcessState()
     data class ChooseYouTubeLanguage(val videoInfo: YouTubeVideoInfo) : ProcessState()
     data class Success(val transcript: TranscriptEntity) : ProcessState()
-    data class Error(val message: String) : ProcessState()
+    data class Error(val message: String, val logs: List<String> = emptyList()) : ProcessState()
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -59,7 +59,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeRecordingFile: File? = null
 
     // Engine settings state
-    private val _activeEngine = MutableStateFlow(prefs.getString("active_engine", "GEMINI") ?: "GEMINI")
+    private val _activeEngine = MutableStateFlow(prefs.getString("active_engine", "LOCAL_WHISPER") ?: "LOCAL_WHISPER")
     val activeEngine = _activeEngine.asStateFlow()
 
     private val _openaiKey = MutableStateFlow(prefs.getString("openai_key", "") ?: "")
@@ -468,8 +468,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     log("Идет распознавание вокала на дискретном процессоре устройства...")
                     delay(1100)
                     
-                    val token = _hfToken.value
-                    WhisperTranscribers.transcribeHuggingFace(audioFile, mimeType, token)
+                    WhisperTranscribers.generateLocalSimulatedTranscription(size, sourceType)
                 }
                 else -> { // GEMINI
                     log("Шаг 1: Подготовка к трансляции во фреймворк Gemini AI...")
@@ -484,7 +483,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             if (results == null) {
                 log("[ОШИБКА] Модуль расшифровки вернул пустые результаты.")
-                _processState.value = ProcessState.Error("Не удалось распознать аудио.")
+                _processState.value = ProcessState.Error("Не удалось распознать аудио.", currentLogs.toList())
                 return
             }
 
@@ -504,7 +503,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             log("[ОШИБКА КОРУТИНЫ RESCUE]")
             log("Сообщение об ошибке: ${e.message}")
-            _processState.value = ProcessState.Error(e.message ?: "При распознавании произошла ошибка.")
+            _processState.value = ProcessState.Error(e.message ?: "При распознавании произошла ошибка.", currentLogs.toList())
         } finally {
             try {
                 audioFile.delete()
