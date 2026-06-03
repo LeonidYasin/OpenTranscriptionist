@@ -11,9 +11,15 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -118,11 +124,357 @@ fun MainScreen(
                     containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
                 ),
                 actions = {
+                    // Settings Button
+                    var showSettingsDialog by remember { mutableStateOf(false) }
+                    val activeEngine by viewModel.activeEngine.collectAsStateWithLifecycle()
+                    val openaiKey by viewModel.openaiKey.collectAsStateWithLifecycle()
+                    val hfToken by viewModel.hfToken.collectAsStateWithLifecycle()
+
+                    IconButton(onClick = { showSettingsDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Настройки движка",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Render Settings Dialog if triggered
+                    if (showSettingsDialog) {
+                        var expanded by remember { mutableStateOf(false) }
+                        var editedOpenaiKey by remember { mutableStateOf(openaiKey) }
+                        var editedHfToken by remember { mutableStateOf(hfToken) }
+                        
+                        val isModelDownloaded by viewModel.isModelDownloaded.collectAsStateWithLifecycle()
+                        val localModelSize by viewModel.localModelSize.collectAsStateWithLifecycle()
+                        var isDownloading by remember { mutableStateOf(false) }
+                        var downloadProgress by remember { mutableStateOf(0f) }
+
+                        AlertDialog(
+                            onDismissRequest = { showSettingsDialog = false },
+                            title = { 
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Text("Настройки распознавания") 
+                                }
+                            },
+                            text = {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text("Выберите движок для распознавания файлов и микрофона:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    
+                                    Box(modifier = Modifier.fillMaxWidth()) {
+                                        OutlinedButton(
+                                            onClick = { expanded = true },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = when (activeEngine) {
+                                                        "HF" -> "🤗 Hugging Face (Бесплатно)"
+                                                        "OPENAI" -> "🔑 OpenAI Whisper (Платно)"
+                                                        "LOCAL_WHISPER" -> "📱 Локальный Whisper на телефоне"
+                                                        else -> "✨ Gemini 1.5 Flash (Бесплатно, топ)"
+                                                    },
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                            }
+                                        }
+                                        DropdownMenu(
+                                            expanded = expanded,
+                                            onDismissRequest = { expanded = false },
+                                            modifier = Modifier.fillMaxWidth(0.8f)
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("✨ Gemini 1.5 Flash (Бесплатно, топ)") },
+                                                onClick = {
+                                                    viewModel.setEngine("GEMINI")
+                                                    expanded = false
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("🤗 Hugging Face Whisper-L3 (Бесплатно)") },
+                                                onClick = {
+                                                    viewModel.setEngine("HF")
+                                                    expanded = false
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("🔑 OpenAI Whisper API (Платно)") },
+                                                onClick = {
+                                                    viewModel.setEngine("OPENAI")
+                                                    expanded = false
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("📱 Локальный Whisper на телефоне") },
+                                                onClick = {
+                                                    viewModel.setEngine("LOCAL_WHISPER")
+                                                    expanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+ 
+                                    Spacer(modifier = Modifier.height(4.dp))
+ 
+                                    when (activeEngine) {
+                                        "GEMINI" -> {
+                                            Text(
+                                                text = "Использует официальный ключ Gemini API Key из AI Studio Secrets panel. 100% бесплатно (до 1500 запросов в день), работает мгновенно в облаке Google с высочайшей точностью.",
+                                                fontSize = 11.sp,
+                                                lineHeight = 14.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        "HF" -> {
+                                            Text(
+                                                text = "Использует открытую модель Whisper-Large-V3 на серверах Hugging Face. Ключ не обязателен, но при наличии лимитов вы можете указать свой HF Token:",
+                                                fontSize = 11.sp,
+                                                lineHeight = 14.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            OutlinedTextField(
+                                                value = editedHfToken,
+                                                onValueChange = { editedHfToken = it },
+                                                label = { Text("Hugging Face API Token") },
+                                                placeholder = { Text("hf_...") },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                        "OPENAI" -> {
+                                            Text(
+                                                text = "Использует официальный Whisper API за ваш счет ($0.006/мин). Требуется ваш личный OpenAI API Key:",
+                                                fontSize = 11.sp,
+                                                lineHeight = 14.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            OutlinedTextField(
+                                                value = editedOpenaiKey,
+                                                onValueChange = { editedOpenaiKey = it },
+                                                label = { Text("OpenAI API Key") },
+                                                placeholder = { Text("sk-...") },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                        "LOCAL_WHISPER" -> {
+                                            Text(
+                                                text = "Использует модель Whisper на вашем Android-устройстве без доступа к Интернету. Модель сохраняется на флеш-памяти телефона для оффлайн работы.",
+                                                fontSize = 11.sp,
+                                                lineHeight = 14.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+
+                                            Text(
+                                                text = "Размер Whisper модели:",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                val sizes = listOf(
+                                                    "tiny" to "Tiny (~75M)",
+                                                    "base" to "Base (~145M)",
+                                                    "small" to "Small (~460M)"
+                                                )
+                                                sizes.forEach { (sizeId, label) ->
+                                                    val isSelected = localModelSize == sizeId
+                                                    Button(
+                                                        onClick = { 
+                                                            if (!isDownloading) {
+                                                                viewModel.setLocalModelSize(sizeId) 
+                                                            }
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(
+                                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                        ),
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        modifier = Modifier.weight(1f),
+                                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+                                                        enabled = !isDownloading
+                                                    ) {
+                                                        Text(label, fontSize = 10.sp, maxLines = 1)
+                                                    }
+                                                }
+                                            }
+
+                                            val sizeLabel = when (localModelSize) {
+                                                "tiny" -> "Tiny (Быстрая, низкая точность)"
+                                                "base" -> "Base (Сбалансированная)"
+                                                else -> "Small (Высокая точность, рекомендуется для русского языка)"
+                                            }
+
+                                            Text(
+                                                text = "Выбрано: $sizeLabel",
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            
+                                            if (isModelDownloaded) {
+                                                Card(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                                    )
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier.padding(12.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                        horizontalAlignment = Alignment.CenterHorizontally
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                            modifier = Modifier.fillMaxWidth()
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.CheckCircle,
+                                                                contentDescription = null,
+                                                                tint = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.size(24.dp)
+                                                            )
+                                                            Text(
+                                                                text = "Модель Whisper-${localModelSize.uppercase()} успешно загружена на телефон! Можно пользоваться оффлайн.",
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                                            )
+                                                        }
+                                                        
+                                                        Button(
+                                                            onClick = { viewModel.deleteLocalModel() },
+                                                            colors = ButtonDefaults.buttonColors(
+                                                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                                            ),
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            modifier = Modifier.fillMaxWidth()
+                                                        ) {
+                                                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                            Text("Удалить модель с диска Android", fontSize = 11.sp)
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                Card(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                                                    )
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier.padding(12.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                        horizontalAlignment = Alignment.CenterHorizontally
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                            modifier = Modifier.fillMaxWidth()
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Warning,
+                                                                contentDescription = null,
+                                                                tint = MaterialTheme.colorScheme.error,
+                                                                modifier = Modifier.size(24.dp)
+                                                            )
+                                                            Text(
+                                                                text = "Модель Whisper-${localModelSize.uppercase()} не установлена! Локальное распознавание временно заблокировано.",
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = MaterialTheme.colorScheme.onErrorContainer
+                                                            )
+                                                        }
+                                                        
+                                                        if (isDownloading) {
+                                                            Column(
+                                                                modifier = Modifier.fillMaxWidth(),
+                                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                                            ) {
+                                                                LinearProgressIndicator(
+                                                                    progress = { downloadProgress },
+                                                                    modifier = Modifier.fillMaxWidth(),
+                                                                    color = MaterialTheme.colorScheme.primary,
+                                                                    trackColor = MaterialTheme.colorScheme.primaryContainer
+                                                                )
+                                                                Text(
+                                                                    text = "Скачивание весов модели... ${(downloadProgress * 100).toInt()}%",
+                                                                    fontSize = 11.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                                )
+                                                            }
+                                                        } else {
+                                                            Button(
+                                                                onClick = {
+                                                                    isDownloading = true
+                                                                    viewModel.downloadModel(
+                                                                        onProgress = { p -> downloadProgress = p },
+                                                                        onResult = { success -> isDownloading = false }
+                                                                    )
+                                                                },
+                                                                shape = RoundedCornerShape(8.dp),
+                                                                modifier = Modifier.fillMaxWidth()
+                                                            ) {
+                                                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                                 Spacer(modifier = Modifier.width(6.dp))
+                                                                Text("Скачать модель Whisper-${localModelSize.uppercase()}", fontSize = 11.sp)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                Button(onClick = {
+                                    if (activeEngine == "OPENAI") {
+                                        viewModel.setOpenaiKey(editedOpenaiKey)
+                                    } else if (activeEngine == "HF") {
+                                        viewModel.setHfToken(editedHfToken)
+                                    }
+                                    showSettingsDialog = false
+                                }) {
+                                    Text("Применить")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showSettingsDialog = false }) {
+                                    Text("Отмена")
+                                }
+                            }
+                        )
+                    }
+
                     // Quick stats/API warning indicator if key is placeholder
                     val apiKey = BuildConfig.GEMINI_API_KEY
-                    if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+                    if (activeEngine == "GEMINI" && (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY")) {
                         IconButton(onClick = {
-                            Toast.makeText(context, "Внимание: Введите GEMINI_API_KEY в панели Secrets", Toast.LENGTH_LONG).show()
+                            android.widget.Toast.makeText(context, "Внимание: Введите GEMINI_API_KEY в панели Secrets", android.widget.Toast.LENGTH_LONG).show()
                         }) {
                             Icon(
                                 imageVector = Icons.Default.Warning,
@@ -336,33 +688,134 @@ fun MainScreen(
 
             // Foreground Overlays based on state changes
             
-            // 1. Process loading states
+            // 1. Process loading states with retro terminal log details
             if (processState is ProcessState.Loading) {
-                val loadingMsg = (processState as ProcessState.Loading).message
+                val state = processState as ProcessState.Loading
+                val loadingMsg = state.message
+                val logs = state.logs
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.7f))
+                        .background(Color.Black.copy(alpha = 0.85f))
                         .clickable(enabled = false) {}, // Scrim protection
                     contentAlignment = Alignment.Center
                 ) {
                     Card(
-                        modifier = Modifier.padding(24.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        modifier = Modifier
+                            .fillMaxWidth(0.95f)
+                            .fillMaxHeight(0.85f)
+                            .padding(12.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F0F0F)),
+                        border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f))
                     ) {
                         Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(12.dp)
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(48.dp))
+                            // Terminal Header
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Three window control dots (retro style)
+                                    Box(modifier = Modifier.size(10.dp).background(Color(0xFFFF5F56), CircleShape))
+                                    Box(modifier = Modifier.size(10.dp).background(Color(0xFFFFBD2E), CircleShape))
+                                    Box(modifier = Modifier.size(10.dp).background(Color(0xFF27C93F), CircleShape))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "console_output.log",
+                                        color = Color(0xFFE0E0E0),
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = Color(0xFF00FF66),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                            
+                            Divider(color = Color(0xFF00FF66).copy(alpha = 0.2f), thickness = 1.dp)
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            // Headline status
                             Text(
-                                text = loadingMsg,
-                                fontSize = 14.sp,
-                                textAlign = TextAlign.Center,
-                                fontWeight = FontWeight.Medium
+                                text = "СТАТУС: $loadingMsg",
+                                color = Color(0xFF00FF66),
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 6.dp)
                             )
+                            
+                            // Console Log list (Auto scroll)
+                            val listState = rememberLazyListState()
+                            
+                            // Always scroll to end when log size changes
+                            LaunchedEffect(logs.size) {
+                                if (logs.isNotEmpty()) {
+                                    listState.animateScrollToItem(logs.size - 1)
+                                }
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .background(Color(0xFF070707))
+                                    .border(BorderStroke(0.5.dp, Color(0xFF333333)))
+                                    .padding(8.dp)
+                            ) {
+                                if (logs.isEmpty()) {
+                                    Text(
+                                        text = "Ожидание запуска вычислительных потоков...\n_ ",
+                                        color = Color.LightGray.copy(alpha = 0.6f),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp
+                                    )
+                                } else {
+                                    LazyColumn(
+                                        state = listState,
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        items(logs) { logLine ->
+                                            Text(
+                                                text = if (logLine.startsWith("[ОШИБКА]")) "❌ $logLine" else if (logLine.startsWith("[УСПЕХ]") || logLine.contains("Успешно")) "✅ $logLine" else "  $logLine",
+                                                color = if (logLine.startsWith("[ОШИБКА]")) Color(0xFFFF5252) else if (logLine.startsWith("[УСПЕХ]")) Color(0xFF00FF66) else Color(0xFFECEFF1),
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 11.sp,
+                                                lineHeight = 15.sp
+                                            )
+                                        }
+                                        item {
+                                            // blinking cursor at the very bottom
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = "  sh-4.4$ ",
+                                                    color = Color(0xFF00FF66).copy(alpha = 0.7f),
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                BlinkingCursor()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -740,7 +1193,7 @@ fun TranscriptDetailView(
 
     // SAF Document Savers launchers
     val srtPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("text/plain")
+        contract = ActivityResultContracts.CreateDocument("application/x-subrip")
     ) { uri ->
         uri?.let {
             writeStringUri(contentResolver, it, transcript.srtText, context, "Субтитры успешно сохранены!")
@@ -970,4 +1423,30 @@ private fun writeStringUri(
     } catch (e: Exception) {
         Toast.makeText(context, "Не удалось записать файл: ${e.message}", Toast.LENGTH_LONG).show()
     }
+}
+
+@Composable
+fun BlinkingCursor() {
+    val transition = rememberInfiniteTransition(label = "cursor")
+    val alpha by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1000
+                0.0f at 0
+                1.0f at 499
+                1.0f at 500
+                0.0f at 1000
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "cursor_alpha"
+    )
+    Box(
+        modifier = Modifier
+            .width(8.dp)
+            .height(13.dp)
+            .background(Color(0xFF00FF66).copy(alpha = alpha))
+    )
 }
