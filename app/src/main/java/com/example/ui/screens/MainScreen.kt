@@ -44,6 +44,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.BuildConfig
 import com.example.data.database.TranscriptEntity
+import com.example.data.youtube.YouTubeTranscriptExtractor
 import com.example.ui.MainViewModel
 import com.example.ui.ProcessState
 import com.example.utils.VoiceRecorder
@@ -268,7 +269,7 @@ fun MainScreen(
                             }
                         ) {
                             Icon(
-                                imageVector = if (isRecording) Icons.Default.Stop :+ Icons.Default.Mic,
+                                imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
                                 contentDescription = "Mic Trigger",
                                 tint = Color.White,
                                 modifier = Modifier.size(24.dp)
@@ -717,6 +718,7 @@ fun HistoryItemCard(
 }
 
 // Detailed Pane Viewer with clean Material tabs
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TranscriptDetailView(
     transcript: TranscriptEntity,
