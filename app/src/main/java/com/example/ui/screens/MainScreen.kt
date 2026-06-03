@@ -70,6 +70,8 @@ fun MainScreen(
     val history by viewModel.history.collectAsStateWithLifecycle()
     val currentViewingTranscript by viewModel.currentViewingTranscript.collectAsStateWithLifecycle()
     val isRecording by viewModel.isRecording.collectAsStateWithLifecycle()
+    val systemSttText by viewModel.systemSttText.collectAsStateWithLifecycle()
+    val systemSttStatus by viewModel.systemSttStatus.collectAsStateWithLifecycle()
 
     val recorder = remember { VoiceRecorder(context) }
 
@@ -80,7 +82,7 @@ fun MainScreen(
 
     // File selection picker intent
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {
             viewModel.processLocalAudio(context, it)
@@ -92,7 +94,12 @@ fun MainScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            viewModel.startRecording(recorder)
+            val engine = viewModel.activeEngine.value
+            if (engine == "SYSTEM_STT") {
+                viewModel.startSystemStt(context)
+            } else {
+                viewModel.startRecording(recorder)
+            }
         } else {
             Toast.makeText(context, "Для записи звука требуется доступ к микрофону", Toast.LENGTH_LONG).show()
         }
@@ -185,6 +192,7 @@ fun MainScreen(
                                                         "HF" -> "🤗 Hugging Face (Бесплатно)"
                                                         "OPENAI" -> "🔑 OpenAI Whisper (Платно)"
                                                         "LOCAL_WHISPER" -> "📱 Локальный Whisper на телефоне"
+                                                        "SYSTEM_STT" -> "🎤 Системный оффлайн-STT (Google)"
                                                         else -> "✨ Gemini 1.5 Flash (Бесплатно, топ)"
                                                     },
                                                     color = MaterialTheme.colorScheme.onSurface
@@ -225,12 +233,27 @@ fun MainScreen(
                                                     expanded = false
                                                 }
                                             )
+                                            DropdownMenuItem(
+                                                text = { Text("🎤 Системный оффлайн-STT (Google)") },
+                                                onClick = {
+                                                    viewModel.setEngine("SYSTEM_STT")
+                                                    expanded = false
+                                                }
+                                            )
                                         }
                                     }
  
                                     Spacer(modifier = Modifier.height(4.dp))
  
                                     when (activeEngine) {
+                                        "SYSTEM_STT" -> {
+                                            Text(
+                                                text = "Использует встроенный в Android SpeechRecognizer. Работает абсолютно бесплатно, оффлайн на 100%, распознает голос с микрофона в реальном времени. Рекомендуется установить русские оффлайн-пакеты в настройках Google Speech Services.",
+                                                fontSize = 11.sp,
+                                                lineHeight = 14.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                         "GEMINI" -> {
                                             Text(
                                                 text = "Использует официальный ключ Gemini API Key из AI Studio Secrets panel. 100% бесплатно (до 1500 запросов в день), работает мгновенно в облаке Google с высочайшей точностью.",
@@ -555,14 +578,27 @@ fun MainScreen(
                     // Option 2: Local Upload Card
                     InteractiveSourceCard(
                         title = "Аудиофайл",
-                        description = "Загрузить mp3, wav...",
+                        description = "Загрузить mp3, wav, aac, m4a...",
                         icon = Icons.Default.AudioFile,
                         tintColor = Color(0xFF4DA6FF),
                         modifier = Modifier
                             .weight(1f)
                             .testTag("upload_file_btn"),
                         onClick = {
-                            filePickerLauncher.launch("audio/*")
+                            filePickerLauncher.launch(
+                                arrayOf(
+                                    "audio/mpeg",
+                                    "audio/mp3",
+                                    "audio/wav",
+                                    "audio/x-wav",
+                                    "audio/wave",
+                                    "audio/aac",
+                                    "audio/x-aac",
+                                    "audio/mp4",
+                                    "audio/m4a",
+                                    "audio/x-m4a"
+                                )
+                            )
                         }
                     )
                 }
@@ -585,18 +621,31 @@ fun MainScreen(
                             .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val activeEngine = viewModel.activeEngine.value
                         Column(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                text = if (isRecording) "Идет запись аудио..." else "Диктофон",
+                                text = if (isRecording) {
+                                    if (activeEngine == "SYSTEM_STT") "Системный STT активен..." else "Идет запись аудио..."
+                                } else {
+                                    if (activeEngine == "SYSTEM_STT") "Системная диктовка" else "Диктофон"
+                                },
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                                 color = if (isRecording) Color.Red else MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = if (isRecording) "Нажмите на круг снизу, чтобы остановить" else "Запись лекции или мысли в реальном времени",
+                                text = if (isRecording) {
+                                    if (activeEngine == "SYSTEM_STT") {
+                                        systemSttText.ifEmpty { "Говорите в микрофон, распознавание идет оффлайн..." }
+                                    } else {
+                                        "Нажмите на круг снизу, чтобы остановить"
+                                    }
+                                } else {
+                                    if (activeEngine == "SYSTEM_STT") "Локальный голосовой ввод в реальном времени" else "Запись лекции или мысли в реальном времени"
+                                },
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -612,7 +661,12 @@ fun MainScreen(
                                 .testTag("record_mic_btn"),
                             onClick = {
                                 if (isRecording) {
-                                    viewModel.stopAndProcessRecording(recorder)
+                                    val engine = viewModel.activeEngine.value
+                                    if (engine == "SYSTEM_STT") {
+                                        viewModel.stopSystemStt()
+                                    } else {
+                                        viewModel.stopAndProcessRecording(recorder)
+                                    }
                                 } else {
                                     audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
